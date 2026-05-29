@@ -1,0 +1,126 @@
+product_id,product_name,category,sub_category,brand,unit_price,stock_qty
+1,iPhone 15,Électronique,Smartphones,TechZone,360.76,230
+2,Samsung S24,Électronique,Smartphones,TechZone,319.06,224
+3,Pixel 8,Électronique,Smartphones,TechZone,1039.02,397
+4,Xiaomi 14,Électronique,Smartphones,FashionHub,975.21,415
+5,OnePlus 12,Électronique,Smartphones,HomeStyle,886.45,440
+6,MacBook Air,Électronique,Laptops,SportPro,854.35,84
+7,Dell XPS,Électronique,Laptops,FashionHub,741.3,416
+8,HP Spectre,Électronique,Laptops,TechZone,252.3,291
+9,Lenovo ThinkPad,Électronique,Laptops,HomeStyle,424.22,305
+10,Asus ZenBook,Électronique,Laptops,HomeStyle,648.83,360
+11,iPad Pro,Électronique,Tablettes,EcoShop,354.7,136
+12,Samsung Tab,Électronique,Tablettes,EcoShop,1143.11,460
+13,Surface Pro,Électronique,Tablettes,TechZone,816.76,69
+14,Lenovo Tab,Électronique,Tablettes,SportPro,1155.51,470
+15,Amazon Fire,Électronique,Tablettes,HomeStyle,75.85,443
+16,Sony WH-1000XM5,Électronique,Casques,FashionHub,788.8,127
+17,AirPods Pro,Électronique,Casques,HomeStyle,179.76,424
+18,Bose QC45,Électronique,Casques,SportPro,300.83,250
+19,Jabra Elite,Électronique,Casques,HomeStyle,174.9,321
+20,Sennheiser HD,Électronique,Casques,SportPro,500.0,38
+21,Chargeur USB-C,Électronique,Accessoires,TechZone,762.19,206
+22,Coque iPhone,Électronique,Accessoires,HomeStyle,621.16,355
+23,Câble HDMI,Électronique,Accessoires,HomeStyle,1123.92,232
+24,Souris sans fil,Électronique,Accessoires,HomeStyle,1140.55,297
+25,Clavier mécanique,Électronique,Accessoires,TechZone,7.96,374
+26,Chemise Oxford,Mode,Vêtements Homme,HomeStyle,1166.72,435
+27,Jean Slim,Mode,Vêtements Homme,EcoShop,80.68,203
+28,Pull Cachemire,Mode,Vêtements Homme,SportPro,265.31,422
+29,Veste Blazer,Mode,Vêtements Homme,HomeStyle,258.16,165
+30,T-shirt Coton,Mode,Vêtements Homme,HomeStyle,994.87,280
+31,Robe Florale,Mode,Vêtements Femme,EcoShop,695.63,436
+32,Blouse Soie,Mode,Vêtements Femme,HomeStyle,584.98,457
+33,Jean Boyfriend,Mode,Vêtements Femme,TechZone,820.65,23
+34,Manteau Laine,Mode,Vêtements Femme,SportPro,123.99,8
+35,Top Modal,Mode,Vêtements Femme,FashionHub,153.46,225
+36,Sneakers Nike,Mode,Chaussures,SportPro,550.54,103
+37,Mocassins Cuir,Mode,Chaussures,FashionHub,1194.85,451
+38,Bottines Femme,Mode,Chaussures,FashionHub,781.75,447
+39,Sandales Été,Mode,Chaussures,HomeStyle,1119.61,47
+40,Derby Homme,Mode,Chaussures,HomeStyle,787.23,42
+41,Sac à Dos,Mode,Sacs,FashionHub,449.35,26
+42,Tote Bag,Mode,Sacs,HomeStyle,478.63,371
+43,Portefeuille,Mode,Sacs,FashionHub,840.83,219
+44,Sac Bandoulière,Mode,Sacs,TechZone,788.3,0
+45,Valise Cabine,Mode,Sacs,TechZone,260.04,67
+46,Montre Classique,Mode,Montres,EcoShop,714.45,348
+47,Smartwatch,Mode,Montres,TechZone,536.85,356
+48,Montre Plongée,Mode,Montres,TechZone,415.57,440
+49,Bracelet Acier,Mode,Montres,FashionHub,509.67,244
+50,Montre Solaire,Mode,Montres,SportPro,89.64,45
+51,Vase Céramique,Maison,Décoration,TechZone,878.26,52
+52,Tableau Abstrait,Maison,Décoration,HomeStyle,379.46,70
+53,Plante Artificielle,Maison,Décoration,FashionHub,462.35,328
+54,Bougie Parfumée,Maison,Décoration,FashionHub,1191.56,35
+55,Miroir Rond,Maison,Décoration,TechZone,638.96,312
+56,Cafetière,Maison,Cuisine,SportPro,781.77,179
+57,Blender,Maison,Cuisine,FashionHub,868.31,470
+58,Air Fryer,Maison,Cuisine,SportPro,496.99,440
+59,Planche à Découper,Maison,Cuisine,TechZone,264.61,71
+60,Couteaux Chef,Maison,Cuisine,EcoShop,904.17,373
+61,Couette Duvet,Maison,Literie,SportPro,463.92,161
+62,Oreiller Mémoire,Maison,Literie,FashionHub,950.34,141
+63,Drap Percale,Maison,Literie,FashionHub,775.32,283
+64,Protège-Matelas,Maison,Literie,EcoShop,723.19,145
+65,Couvre-Lit,Maison,Literie,TechZone,935.87,434
+66,Lampe LED,Maison,Éclairage,HomeStyle,1017.25,105
+67,Guirlande Lumineuse,Maison,Éclairage,EcoShop,623.71,96
+68,Plafonnier,Maison,Éclairage,HomeStyle,898.67,330
+69,Lampe Bureau,Maison,Éclairage,FashionHub,70.21,253
+70,Veilleuse,Maison,Éclairage,FashionHub,466.13,255
+71,Arrosoir,Maison,Jardin,TechZone,767.51,270
+72,Pelle Jardinage,Maison,Jardin,TechZone,1067.03,184
+73,Pot Terre Cuite,Maison,Jardin,FashionHub,1121.04,198
+74,Graines Basilic,Maison,Jardin,EcoShop,1033.67,215
+75,Tuyau Arrosage,Maison,Jardin,FashionHub,441.67,390
+76,Haltères 10kg,Sport,Fitness,TechZone,567.86,8
+77,Tapis Yoga,Sport,Fitness,TechZone,706.9,134
+78,Bande Élastique,Sport,Fitness,TechZone,262.81,485
+79,Corde à Sauter,Sport,Fitness,EcoShop,948.2,146
+80,Kettlebell,Sport,Fitness,EcoShop,756.14,392
+81,Ballon Nike,Sport,Football,SportPro,501.44,42
+82,Crampons,Sport,Football,EcoShop,770.44,315
+83,Protège-Tibias,Sport,Football,TechZone,187.45,158
+84,Maillot PSG,Sport,Football,FashionHub,99.43,498
+85,Sac Sport,Sport,Football,EcoShop,970.63,167
+86,Chaussures Trail,Sport,Running,TechZone,471.92,158
+87,Montre GPS,Sport,Running,FashionHub,839.92,29
+88,Gilet Réflecteur,Sport,Running,SportPro,297.15,59
+89,Brassard Téléphone,Sport,Running,EcoShop,546.78,28
+90,Chaussettes Run,Sport,Running,FashionHub,374.6,61
+91,Lunettes Natation,Sport,Natation,FashionHub,20.13,359
+92,Bonnet Silicone,Sport,Natation,SportPro,18.56,487
+93,Combinaison Triathlon,Sport,Natation,EcoShop,419.31,400
+94,Palmes,Sport,Natation,HomeStyle,987.9,85
+95,Pull-Buoy,Sport,Natation,HomeStyle,449.38,375
+96,Tapis Premium,Sport,Yoga,TechZone,1064.27,171
+97,Bloc Yoga,Sport,Yoga,HomeStyle,969.49,268
+98,Sangle,Sport,Yoga,EcoShop,81.33,321
+99,Coussin Méditation,Sport,Yoga,SportPro,97.1,261
+100,Sac Tapis,Sport,Yoga,SportPro,435.35,439
+101,Crème Hydratante,Beauté,Soin Visage,HomeStyle,682.43,80
+102,Sérum Vitamine C,Beauté,Soin Visage,TechZone,309.86,457
+103,Masque Argile,Beauté,Soin Visage,TechZone,690.83,116
+104,Nettoyant Doux,Beauté,Soin Visage,TechZone,890.23,22
+105,Contour Yeux,Beauté,Soin Visage,TechZone,1031.13,125
+106,Foundation,Beauté,Maquillage,HomeStyle,59.95,196
+107,Rouge à Lèvres,Beauté,Maquillage,FashionHub,1104.67,476
+108,Mascara,Beauté,Maquillage,TechZone,1152.61,283
+109,Palette Ombres,Beauté,Maquillage,SportPro,964.72,114
+110,Fond de Teint,Beauté,Maquillage,SportPro,389.55,468
+111,Chanel N°5,Beauté,Parfums,HomeStyle,865.74,422
+112,Dior Sauvage,Beauté,Parfums,HomeStyle,98.08,61
+113,YSL Black Opium,Beauté,Parfums,TechZone,604.94,91
+114,Lancôme La Vie Est Belle,Beauté,Parfums,EcoShop,271.71,23
+115,Armani Si,Beauté,Parfums,TechZone,1145.12,449
+116,Shampoing Kératine,Beauté,Cheveux,HomeStyle,560.79,396
+117,Après-Shampooing,Beauté,Cheveux,HomeStyle,1014.59,44
+118,Masque Réparateur,Beauté,Cheveux,TechZone,665.94,188
+119,Huile Argan,Beauté,Cheveux,EcoShop,244.8,401
+120,Spray Protecteur,Beauté,Cheveux,EcoShop,368.17,124
+121,Dentifrice Blancheur,Beauté,Hygiène,EcoShop,559.39,497
+122,Déodorant 48h,Beauté,Hygiène,FashionHub,594.57,375
+123,Gel Douche,Beauté,Hygiène,FashionHub,1081.03,77
+124,Lotion Corps,Beauté,Hygiène,SportPro,12.62,12
+125,Rasoir Électrique,Beauté,Hygiène,HomeStyle,283.43,325

@@ -1,0 +1,545 @@
+from __future__ import annotations
+
+import time
+import logging
+from concurrent.futures import ThreadPoolExecutor, as_completed
+from datetime import datetime, timezone
+from typing import Dict, List, Optional
+
+from app.core.config import settings
+from app.services.hive_service import hive_service
+
+logger = logging.getLogger(__name__)
+
+_MAX_WORKERS = 5
+
+
+class OverviewService:
+    def __init__(self):
+        self._cache: Optional[Dict[str, object]] = None
+        self._cache_at = 0.0
+
+    # ------------------------------------------------------------------ utils
+
+    def _normalize(self, value: str) -> str:
+        return ''.join(ch for ch in (value or '').lower() if ch.isalnum())
+
+    def _find_table(self, schema, preferred_names, exclude_keywords=None):
+        exclude_keywords = exclude_keywords or []
+        normalized_preferred = [self._normalize(n) for n in preferred_names]
+        normalized_excluded  = [self._normalize(n) for n in exclude_keywords]
+        exact = {}
+        for table in schema:
+            nt = self._normalize(table)
+            if any(w in nt for w in normalized_excluded):
+                continue
+            for pref in normalized_preferred:
+                if nt == pref:
+                    exact[table] = len(pref)
+        if exact:
+            return max(exact, key=exact.get)
+        scored = {}
+        for table in schema:
+            nt = self._normalize(table)
+            if any(w in nt for w in normalized_excluded):
+                continue
+            score = 0
+            for pref in normalized_preferred:
+                if pref in nt or nt in pref:
+                    score = max(score, len(pref))
+            if score:
+                scored[table] = score
+        return max(scored, key=scored.get) if scored else None
+
+    def _find_column(self, columns, aliases):
+        normalized_aliases = [self._normalize(a) for a in aliases]
+        exact = {}
+        for col in columns:
+            nc = self._normalize(col)
+            for alias in normalized_aliases:
+                if nc == alias:
+                    exact[col] = len(alias)
+        if exact:
+            return max(exact, key=exact.get)
+        scored = {}
+        for col in columns:
+            nc = self._normalize(col)
+            score = 0
+            for alias in normalized_aliases:
+                if alias in nc or nc in alias:
+                    score = max(score, len(alias))
+            if score:
+                scored[col] = score
+        return max(scored, key=scored.get) if scored else None
+
+    def _run_rows(self, sql: Optional[str]) -> List[dict]:
+        if not sql:
+            return []
+        try:
+            _, rows = hive_service.run_query(sql)
+            return rows
+        except Exception as e:
+            logger.warning("Query failed: %s — SQL: %.300s", e, sql)
+            return []
+
+    def _coalesce_text(self, expr, fallback):
+        if not expr:
+            return f"'{fallback}'"
+        return f"COALESCE(CAST({expr} AS STRING), '{fallback}')"
+
+    def _build_item_revenue_expr(self, alias, cols):
+        subtotal = self._find_column(cols, ['subtotal','line_total','item_total','total_price','total_amount','amount','montant'])
+        if subtotal:
+            return f'COALESCE({alias}.{subtotal}, 0)'
+        qty   = self._find_column(cols, ['quantity','qty','quantite'])
+        price = self._find_column(cols, ['unit_price','price','prix_unitaire','sale_price'])
+        if not qty or not price:
+            return None
+        base = f'COALESCE({alias}.{qty}, 0) * COALESCE({alias}.{price}, 0)'
+        disc_amt = self._find_column(cols, ['discount_amount','discount_value','remise_montant'])
+        if disc_amt:
+            return f'({base} - COALESCE({alias}.{disc_amt}, 0))'
+        disc_pct = self._find_column(cols, ['discount_rate','discount_pct','discount_percent','discount','remise'])
+        if disc_pct:
+            return f'({base} * (1 - COALESCE({alias}.{disc_pct}, 0)))'
+        return base
+
+    def _resolve_schema(self, schema):
+        orders_table    = self._find_table(schema, ['orders','sales_orders','customer_orders'], exclude_keywords=['item','line','detail'])
+        customers_table = self._find_table(schema, ['customers','customer','clients','client','users','user'])
+        products_table  = self._find_table(schema, ['products','product','catalog_products','catalog'])
+        items_table     = self._find_table(schema, ['order_items','order_item','order_lines','order_details','line_items'])
+        reviews_table   = self._find_table(schema, ['reviews','review','ratings','rating','avis'])
+
+        oc = schema.get(orders_table, [])    if orders_table    else []
+        cc = schema.get(customers_table, []) if customers_table else []
+        pc = schema.get(products_table, [])  if products_table  else []
+        ic = schema.get(items_table, [])     if items_table     else []
+        rc = schema.get(reviews_table, [])   if reviews_table   else []
+
+        # Log unresolved tables so developers can diagnose missing KPIs
+        missing_tables = [name for name, tbl in [
+            ('orders', orders_table), ('customers', customers_table),
+            ('products', products_table), ('order_items', items_table),
+        ] if not tbl]
+        if missing_tables:
+            logger.warning("Overview: tables non trouvées dans le schéma Hive: %s", missing_tables)
+
+        return {
+            'orders': {
+                'table': orders_table, 'columns': oc,
+                'id':          self._find_column(oc, ['order_id','id_order','commande_id']),
+                'date':        self._find_column(oc, ['order_date','created_at','purchase_date','date_order','date_commande']),
+                'total':       self._find_column(oc, ['total_amount','order_total','grand_total','amount_total','montant_total','total','revenue']),
+                'payment':     self._find_column(oc, ['payment_method','payment_type','mode_paiement','payment']),
+                'status':      self._find_column(oc, ['status','order_status','statut']),
+                'country':     self._find_column(oc, ['shipping_country','country','customer_country','pays','shipping_country_name']),
+                'customer_id': self._find_column(oc, ['customer_id','client_id','user_id','id_customer']),
+            },
+            'customers': {
+                'table': customers_table, 'columns': cc,
+                'id':          self._find_column(cc, ['customer_id','client_id','user_id','id_customer','id']),
+                'signup_date': self._find_column(cc, ['signup_date','register_date','registration_date','date_inscription','created_at']),
+                'country':     self._find_column(cc, ['country','customer_country','pays']),
+            },
+            'products': {
+                'table': products_table, 'columns': pc,
+                'id':           self._find_column(pc, ['product_id','item_id','id_product','sku_id','id']),
+                'name':         self._find_column(pc, ['product_name','product_title','title','name','nom_produit','product']),
+                'category':     self._find_column(pc, ['category','categorie','product_category']),
+                'sub_category': self._find_column(pc, ['sub_category','subcategory','subcategorie','sous_categorie','sub_category_name']),
+            },
+            'order_items': {
+                'table': items_table, 'columns': ic,
+                'order_id':     self._find_column(ic, ['order_id','id_order','commande_id']),
+                'product_id':   self._find_column(ic, ['product_id','item_id','id_product','sku_id']),
+                'quantity':     self._find_column(ic, ['quantity','qty','quantite']),
+                'revenue_expr': self._build_item_revenue_expr('oi', ic),
+            },
+            'reviews': {
+                'table': reviews_table, 'columns': rc,
+                'rating': self._find_column(rc, ['rating','note','score']),
+            },
+        }
+
+    # ──────────────────────────────────────────────────────────────────────────
+    #  Hive session settings injected at the top of every overview query.
+    #  - mapreduce.job.reduces=1         → single reducer, less overhead
+    #  - hive.exec.mode.local.auto=true  → runs in-process if input < 128 MB
+    #    (after TABLESAMPLE, the sampled split is often small enough)
+    #  - hive.stats.fetch.column.stats   → lets Hive use stored stats instead
+    #    of scanning to estimate cardinality
+    # ──────────────────────────────────────────────────────────────────────────
+    _HIVE_HINTS = """\
+SET hive.exec.mode.local.auto=true;
+SET hive.exec.mode.local.auto.inputbytes.max=134217728;
+SET hive.exec.mode.local.auto.tasks.max=4;
+SET mapreduce.job.reduces=1;
+SET hive.stats.fetch.column.stats=true;
+SET hive.stats.fetch.partition.stats=true;
+"""
+
+    def _sample(self, table: str, pct: int = 10) -> str:
+        """
+        Return a TABLESAMPLE clause that scans ~pct % of HDFS blocks.
+        Hive bucket-sampling is exact; block-sampling is approximate but
+        much faster because the InputFormat skips non-sampled splits entirely.
+
+        Syntax: table TABLESAMPLE(x PERCENT)
+        Supported since Hive 0.10 / CDH 4.x.
+        """
+        return f"{table} TABLESAMPLE({pct} PERCENT)"
+
+    # ── orders ────────────────────────────────────────────────────────────────
+
+    def _build_orders_sql(self, o: dict) -> Optional[str]:
+        if not o['table']:
+            return None
+
+        src = self._sample(o['table'], pct=settings.overview_sample_pct)
+        parts = []
+
+        # KPI row — COUNT/SUM/AVG still accurate on sample; we scale COUNT up
+        kpi_v1 = f"CAST(COUNT(*) * {100 // settings.overview_sample_pct} AS DOUBLE)"
+        kpi_v2 = f"ROUND(SUM(COALESCE({o['total']}, 0)) * {100 // settings.overview_sample_pct}, 2)" if o['total'] else "CAST(0 AS DOUBLE)"
+        kpi_v3 = f"ROUND(AVG(COALESCE({o['total']}, 0)), 2)"  if o['total'] else "CAST(0 AS DOUBLE)"
+        parts.append(
+            f"SELECT 'kpi' AS rtype, '' AS dim1, '' AS dim2,"
+            f" {kpi_v1} AS v1, {kpi_v2} AS v2, {kpi_v3} AS v3"
+            f" FROM {src}"
+        )
+
+        if o['date'] and o['total']:
+            parts.append(f"""
+                SELECT 'trend' AS rtype,
+                       substr(CAST({o['date']} AS STRING), 1, 7) AS dim1,
+                       '' AS dim2,
+                       ROUND(SUM(COALESCE({o['total']}, 0)) * {100 // settings.overview_sample_pct}, 2) AS v1,
+                       CAST(0 AS DOUBLE) AS v2,
+                       CAST(0 AS DOUBLE) AS v3
+                FROM {src}
+                WHERE {o['date']} IS NOT NULL
+                GROUP BY substr(CAST({o['date']} AS STRING), 1, 7)
+            """)
+
+        if o['payment']:
+            parts.append(f"""
+                SELECT 'payment' AS rtype,
+                       {self._coalesce_text(o['payment'], 'Non renseigné')} AS dim1,
+                       '' AS dim2,
+                       CAST(COUNT(*) AS DOUBLE) AS v1,
+                       CAST(0 AS DOUBLE) AS v2,
+                       CAST(0 AS DOUBLE) AS v3
+                FROM {src}
+                GROUP BY {self._coalesce_text(o['payment'], 'Non renseigné')}
+            """)
+
+        if o['country'] and o['total']:
+            parts.append(f"""
+                SELECT 'country' AS rtype,
+                       {self._coalesce_text(o['country'], 'Non renseigné')} AS dim1,
+                       '' AS dim2,
+                       CAST(COUNT(*) AS DOUBLE) AS v1,
+                       ROUND(SUM(COALESCE({o['total']}, 0)), 2) AS v2,
+                       CAST(0 AS DOUBLE) AS v3
+                FROM {src}
+                GROUP BY {self._coalesce_text(o['country'], 'Non renseigné')}
+            """)
+
+        if o['status']:
+            parts.append(f"""
+                SELECT 'status' AS rtype,
+                       {self._coalesce_text(o['status'], 'Non renseigné')} AS dim1,
+                       '' AS dim2,
+                       CAST(COUNT(*) AS DOUBLE) AS v1,
+                       CAST(0 AS DOUBLE) AS v2,
+                       CAST(0 AS DOUBLE) AS v3
+                FROM {src}
+                GROUP BY {self._coalesce_text(o['status'], 'Non renseigné')}
+            """)
+
+        return ' UNION ALL '.join(parts)
+
+    def _parse_orders_rows(self, rows):
+        result = {
+            'kpi_order_count': None, 'kpi_revenue': None, 'kpi_avg_order': None,
+            'revenue_trend': [], 'payments': [], 'countries': [], 'order_status': [],
+        }
+        for row in rows:
+            t = row.get('rtype') or row.get('type', '')
+            if t == 'kpi':
+                result['kpi_order_count'] = row.get('v1')
+                result['kpi_revenue']     = row.get('v2')
+                result['kpi_avg_order']   = row.get('v3')
+            elif t == 'trend':
+                result['revenue_trend'].append({'period': row.get('dim1', ''), 'revenue': row.get('v1', 0)})
+            elif t == 'payment':
+                result['payments'].append({'label': row.get('dim1', ''), 'value': row.get('v1', 0)})
+            elif t == 'country':
+                result['countries'].append({'country': row.get('dim1', ''), 'orders_count': row.get('v1', 0), 'revenue': row.get('v2', 0)})
+            elif t == 'status':
+                result['order_status'].append({'label': row.get('dim1', ''), 'value': row.get('v1', 0)})
+        result['revenue_trend'].sort(key=lambda x: x['period'])
+        result['payments'].sort(key=lambda x: -x['value'])
+        result['countries'].sort(key=lambda x: -x['revenue'])
+        result['order_status'].sort(key=lambda x: -x['value'])
+        return result
+
+    # ── customers ─────────────────────────────────────────────────────────────
+
+    def _build_customers_sql(self, c: dict) -> Optional[str]:
+        if not c['table']:
+            return None
+        src = self._sample(c['table'], pct=settings.overview_sample_pct)
+        scale = 100 // settings.overview_sample_pct
+        parts = [
+            f"SELECT 'kpi' AS rtype, '' AS dim1,"
+            f" CAST(COUNT(*) * {scale} AS DOUBLE) AS v1"
+            f" FROM {src}"
+        ]
+        if c['signup_date']:
+            parts.append(f"""
+                SELECT 'growth' AS rtype,
+                       substr(CAST({c['signup_date']} AS STRING), 1, 7) AS dim1,
+                       CAST(COUNT(*) * {scale} AS DOUBLE) AS v1
+                FROM {src}
+                WHERE {c['signup_date']} IS NOT NULL
+                GROUP BY substr(CAST({c['signup_date']} AS STRING), 1, 7)
+            """)
+        return ' UNION ALL '.join(parts)
+
+    def _parse_customers_rows(self, rows):
+        result = {'kpi_customer_count': None, 'customer_growth': [], 'kpi_new_customers': None, 'kpi_new_customers_period': None}
+        for row in rows:
+            t = row.get('rtype') or ''
+            if t == 'kpi':
+                result['kpi_customer_count'] = row.get('v1')
+            elif t == 'growth':
+                result['customer_growth'].append({'period': row.get('dim1', ''), 'value': row.get('v1', 0)})
+        result['customer_growth'].sort(key=lambda x: x['period'])
+        if result['customer_growth']:
+            last = result['customer_growth'][-1]
+            result['kpi_new_customers']        = last['value']
+            result['kpi_new_customers_period'] = last['period']
+        return result
+
+    # ── products ──────────────────────────────────────────────────────────────
+
+    def _build_products_sql(self, p: dict) -> Optional[str]:
+        if not p['table']:
+            return None
+        # Products table is usually small — no sampling needed
+        return f"SELECT COUNT(*) AS value FROM {p['table']}"
+
+    def _parse_products_rows(self, rows):
+        return {'kpi_product_count': rows[0].get('value') if rows else None}
+
+    # ── reviews ───────────────────────────────────────────────────────────────
+
+    def _build_reviews_sql(self, r: dict) -> Optional[str]:
+        if not r['table'] or not r['rating']:
+            return None
+        src = self._sample(r['table'], pct=settings.overview_sample_pct)
+        return f"SELECT ROUND(AVG(COALESCE({r['rating']}, 0)), 2) AS value FROM {src}"
+
+    def _parse_reviews_rows(self, rows):
+        return {'kpi_avg_rating': rows[0].get('value') if rows else None}
+
+    # ── items × products ──────────────────────────────────────────────────────
+
+    def _build_items_products_sql(self, oi: dict, p: dict) -> Optional[str]:
+        if not (oi['table'] and p['table'] and oi['product_id'] and p['id'] and oi['revenue_expr']):
+            return None
+        name_expr = self._coalesce_text(f"p.{p['name']}"         if p['name']         else None, 'Produit')
+        cat_expr  = self._coalesce_text(f"p.{p['category']}"     if p['category']     else None, 'Non classé')
+        sub_expr  = self._coalesce_text(f"p.{p['sub_category']}" if p['sub_category'] else None, 'Général')
+        qty_expr  = f"SUM(COALESCE(oi.{oi['quantity']}, 1))" if oi['quantity'] else 'COUNT(*)'
+        ord_expr  = f"COUNT(DISTINCT oi.{oi['order_id']})"   if oi['order_id']  else 'COUNT(*)'
+        rev_expr  = oi['revenue_expr']
+        pct       = settings.overview_sample_pct
+        oi_src    = self._sample(oi['table'], pct=pct)
+
+        # Products table is small — join full; sample only the large items table
+        return f"""
+            SELECT 'product' AS rtype,
+                   {name_expr} AS dim1,
+                   {cat_expr} AS dim2,
+                   ROUND(SUM({rev_expr}), 2) AS v1,
+                   CAST({qty_expr} AS BIGINT) AS v2,
+                   CAST({ord_expr} AS BIGINT) AS v3
+            FROM {oi_src} oi
+            JOIN {p['table']} p ON oi.{oi['product_id']} = p.{p['id']}
+            GROUP BY {name_expr}, {cat_expr}
+            UNION ALL
+            SELECT 'category' AS rtype,
+                   {cat_expr} AS dim1,
+                   {sub_expr} AS dim2,
+                   ROUND(SUM({rev_expr}), 2) AS v1,
+                   CAST(0 AS DOUBLE) AS v2,
+                   CAST(0 AS DOUBLE) AS v3
+            FROM {oi_src} oi
+            JOIN {p['table']} p ON oi.{oi['product_id']} = p.{p['id']}
+            GROUP BY {cat_expr}, {sub_expr}
+        """
+
+    def _parse_items_products_rows(self, rows):
+        top_products: list = []
+        category_rows: list = []
+        for row in rows:
+            t = row.get('rtype') or ''
+            if t == 'product':
+                top_products.append({'product': row.get('dim1',''), 'revenue': row.get('v1',0), 'quantity': row.get('v2',0), 'orders_count': row.get('v3',0)})
+            elif t == 'category':
+                category_rows.append({'category': row.get('dim1',''), 'sub_category': row.get('dim2',''), 'revenue': row.get('v1',0)})
+        top_products.sort(key=lambda x: -x['revenue'])
+        category_rows.sort(key=lambda x: -x['revenue'])
+        return {'top_products': top_products[:12], 'category_rows': category_rows[:24]}
+
+    # ── parallel fetch ────────────────────────────────────────────────────────
+
+    def _fetch_parallel(self, sql_map: Dict[str, Optional[str]]) -> Dict[str, List[dict]]:
+        results: Dict[str, List[dict]] = {k: [] for k in sql_map}
+        tasks = {k: sql for k, sql in sql_map.items() if sql}
+        if not tasks:
+            return results
+        with ThreadPoolExecutor(max_workers=min(_MAX_WORKERS, len(tasks))) as pool:
+            future_to_key = {pool.submit(self._run_rows, sql): key for key, sql in tasks.items()}
+            for future in as_completed(future_to_key):
+                key = future_to_key[future]
+                try:
+                    results[key] = future.result()
+                except Exception as exc:
+                    logger.warning("Parallel query '%s' raised: %s", key, exc)
+                    results[key] = []
+        return results
+
+    # ------------------------------------------------------------------ main
+
+    def get_overview(self, force_refresh: bool = False) -> Dict[str, object]:
+        cache_age = time.time() - self._cache_at
+        if self._cache and not force_refresh and cache_age < settings.overview_cache_ttl_seconds:
+            return self._cache
+
+        schema = hive_service.get_schema(force_refresh=force_refresh)
+        r = self._resolve_schema(schema)
+
+        o  = r['orders']
+        c  = r['customers']
+        p  = r['products']
+        rv = r['reviews']
+        oi = r['order_items']
+
+        sql_map = {
+            'orders':         self._build_orders_sql(o),
+            'customers':      self._build_customers_sql(c),
+            'products':       self._build_products_sql(p),
+            'reviews':        self._build_reviews_sql(rv),
+            'items_products': self._build_items_products_sql(oi, p),
+        }
+
+        logger.info(
+            "Overview: launching %d parallel queries (sample=%d%%)",
+            sum(1 for s in sql_map.values() if s),
+            settings.overview_sample_pct,
+        )
+        t0 = time.time()
+        raw = self._fetch_parallel(sql_map)
+        logger.info("Overview: all queries done in %.1fs", time.time() - t0)
+
+        orders_data    = self._parse_orders_rows(raw['orders'])
+        customers_data = self._parse_customers_rows(raw['customers'])
+        products_data  = self._parse_products_rows(raw['products'])
+        reviews_data   = self._parse_reviews_rows(raw['reviews'])
+        items_data     = self._parse_items_products_rows(raw['items_products'])
+
+        kpis = []
+        _kpi_null_reasons: List[str] = []
+
+        def _kpi(val, label, helper, is_currency=False, allow_zero=True):
+            if val is not None:
+                try:
+                    fv = float(val)
+                    kpis.append({'label': label, 'value': int(fv) if not is_currency else fv, 'helper': helper, 'is_currency': is_currency})
+                except (TypeError, ValueError) as exc:
+                    _kpi_null_reasons.append(f"{label}: conversion error ({exc})")
+            else:
+                _kpi_null_reasons.append(f"{label}: valeur NULL retournée par Hive")
+                if allow_zero:
+                    # Push a 0-value KPI so the dashboard isn't completely empty
+                    kpis.append({'label': label, 'value': 0 if not is_currency else 0.0, 'helper': helper, 'is_currency': is_currency})
+
+        _kpi(customers_data.get('kpi_customer_count'), 'Clients',               'Clients enregistrés')
+        _kpi(orders_data.get('kpi_order_count'),        'Commandes',            'Volume total')
+        _kpi(orders_data.get('kpi_revenue'),             'Chiffre d\u2019affaires', 'CA cumulé', True)
+        _kpi(orders_data.get('kpi_avg_order'),           'Panier moyen',        'Valeur moyenne par commande', True)
+        _kpi(products_data.get('kpi_product_count'),     'Produits',            'Catalogue disponible')
+        _kpi(reviews_data.get('kpi_avg_rating'),         'Note moyenne',        'Moyenne des avis', allow_zero=False)
+
+        if _kpi_null_reasons:
+            logger.warning(
+                "Overview: %d KPI(s) sans données Hive — raisons: %s",
+                len(_kpi_null_reasons),
+                "; ".join(_kpi_null_reasons),
+            )
+
+        if customers_data.get('kpi_new_customers') is not None:
+            kpis.append({
+                'label': 'Nouveaux clients',
+                'value': int(float(customers_data['kpi_new_customers'])),
+                'helper': f"Période {customers_data.get('kpi_new_customers_period', '')}",
+                'is_currency': False,
+            })
+
+        unavailable: List[str] = []
+        def _check(key, data):
+            if not data:
+                unavailable.append(key)
+            return data or []
+
+        revenue_trend   = _check('revenue_trend',  orders_data.get('revenue_trend', []))
+        payments        = _check('payments',        orders_data.get('payments', []))
+        countries       = _check('countries',       orders_data.get('countries', []))
+        order_status    = _check('order_status',    orders_data.get('order_status', []))
+        top_products    = _check('top_products',    items_data.get('top_products', []))
+        category_rows   = _check('category_rows',   items_data.get('category_rows', []))
+        customer_growth = _check('customer_growth', customers_data.get('customer_growth', []))
+
+        if not countries and r['customers']['table'] and r['customers']['country']:
+            crows = self._run_rows(f"""
+                SELECT {self._coalesce_text(r['customers']['country'], 'Non renseigné')} AS country,
+                       COUNT(*) AS orders_count, CAST(0 AS DOUBLE) AS revenue
+                FROM {self._sample(r['customers']['table'], pct=settings.overview_sample_pct)}
+                GROUP BY {self._coalesce_text(r['customers']['country'], 'Non renseigné')}
+                ORDER BY orders_count DESC LIMIT 12
+            """)
+            if crows:
+                countries = crows
+                unavailable[:] = [x for x in unavailable if x != 'countries']
+
+        payload = {
+            'database':            settings.hive_database,
+            'generated_at':        datetime.now(timezone.utc).isoformat(),
+            'kpis':                kpis,
+            'revenue_trend':       revenue_trend,
+            'payments':            payments,
+            'countries':           countries,
+            'category_rows':       category_rows,
+            'order_status':        order_status,
+            'top_products':        top_products,
+            'customer_growth':     customer_growth,
+            'unavailable_sections': sorted(set(unavailable)),
+        }
+        self._cache     = payload
+        self._cache_at  = time.time()
+        logger.info("Overview done: %d KPIs, %d sections unavailable", len(kpis), len(unavailable))
+        return payload
+
+
+
+    def is_cached(self) -> bool:
+        """Return True if a fresh cached result is available (no Hive call needed)."""
+        cache_age = time.time() - self._cache_at
+        return bool(self._cache) and cache_age < settings.overview_cache_ttl_seconds
+
+
+overview_service = OverviewService()
